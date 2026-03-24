@@ -1,0 +1,13 @@
+* {
+  box-sizing: border-box;
+}
+
+/* Hover sur les cellules de la grille */
+.cell:hover .hover-overlay {
+  opacity: 1 !important;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
