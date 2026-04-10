@@ -11,12 +11,11 @@ function isCanvaUrl(url) {
   return url && url.includes('canva.com')
 }
 
-// Canva nécessite le paramètre ?embed pour autoriser les iframes
 function getCanvaEmbedUrl(url) {
   if (!url) return null
-  const match = url.match(/canva\.com\/design\/([^\/\?]+)/)
-  if (!match) return null
-  return `https://www.canva.com/design/${match[1]}/view?embed&meta`
+  const match = url.match(/canva\.com\/design\/([^\/\?]+)\/([^\/\?]+)/)
+  if (match) return `/api/canva-proxy?url=${encodeURIComponent(url)}`
+  return null
 }
 
 export default function Widget() {
@@ -67,7 +66,15 @@ export default function Widget() {
   }, [config, fetchPosts])
 
   useEffect(() => {
-    const ordered = order.map(id => posts.find(p => p.id === id)).filter(Boolean)
+    // Filtre les posts masqués, trie les pinnés en premier
+    let ordered = order.map(id => posts.find(p => p.id === id)).filter(Boolean)
+    ordered = ordered.filter(p => !p.hidden)
+    
+    // Pinnés en premier (max 3), puis le reste
+    const pinned  = ordered.filter(p => p.pinned).slice(0, 3)
+    const unpinned = ordered.filter(p => !p.pinned)
+    ordered = [...pinned, ...unpinned]
+
     if (filter === 'all') setFiltered(ordered)
     else setFiltered(ordered.filter(p => p.status === filter))
   }, [posts, filter, order])
@@ -91,12 +98,15 @@ export default function Widget() {
   }
   function onDragEnd() { setDragIndex(null) }
 
+  // Grille 4:5 — toujours multiple de 3, min 9 cellules
   const totalCells = Math.max(9, Math.ceil(filtered.length / 3) * 3)
   const cells      = Array.from({ length: totalCells }, (_, i) => filtered[i] || null)
 
   if (!config && error) return <ErrorScreen message={error} />
   if (loading)          return <LoadingScreen />
   if (error)            return <ErrorScreen message={error} onRetry={fetchPosts} />
+
+  const pinnedCount = posts.filter(p => p.pinned && !p.hidden).length
 
   return (
     <>
@@ -118,43 +128,38 @@ export default function Widget() {
               onClick={() => setFilter(f)}
             >
               {f === 'all'
-                ? `Tous (${posts.length})`
-                : `${STATUS_CONFIG[f].label} (${posts.filter(p => p.status === f).length})`}
+                ? `Tous (${posts.filter(p => !p.hidden).length})`
+                : `${STATUS_CONFIG[f].label} (${posts.filter(p => p.status === f && !p.hidden).length})`}
             </button>
           ))}
           <button style={styles.refreshBtn} onClick={fetchPosts} title="Actualiser">↻</button>
         </div>
+
+        {pinnedCount > 0 && (
+          <div style={styles.pinnedHint}>
+            📌 {pinnedCount} post{pinnedCount > 1 ? 's' : ''} épinglé{pinnedCount > 1 ? 's' : ''} en haut
+          </div>
+        )}
 
         <div style={styles.grid}>
           {cells.map((post, i) => (
             <div
               key={post ? post.id : `empty-${i}`}
               className="cell"
-              style={{ ...styles.cell, ...(dragIndex === i ? styles.cellDragging : {}) }}
-              draggable={!!post}
-              onDragStart={() => post && onDragStart(i)}
+              style={{
+                ...styles.cell,
+                ...(dragIndex === i ? styles.cellDragging : {}),
+                ...(post?.pinned ? styles.cellPinned : {}),
+              }}
+              draggable={!!post && !post.pinned}
+              onDragStart={() => post && !post.pinned && onDragStart(i)}
               onDragOver={(e) => post && onDragOver(e, i)}
               onDragEnd={onDragEnd}
               onClick={() => post && setPreview(post)}
             >
               {post ? (
                 <>
-                  {post.imageUrl && isCanvaUrl(post.imageUrl) ? (
-                    // Iframe Canva avec lien ?embed
-                    <div style={styles.canvaWrapper}>
-                      <iframe
-                        src={getCanvaEmbedUrl(post.imageUrl)}
-                        style={styles.canvaIframe}
-                        allowFullScreen
-                        allow="fullscreen *;"
-                        loading="lazy"
-                        title={post.title}
-                        scrolling="no"
-                      />
-                      <div style={styles.canvaClickCatcher} onClick={() => setPreview(post)} />
-                      <div style={styles.canvaBadge}>Canva</div>
-                    </div>
-                  ) : post.imageUrl ? (
+                  {post.imageUrl ? (
                     <img
                       src={post.imageUrl}
                       alt={post.title}
@@ -167,6 +172,8 @@ export default function Widget() {
                       <span style={styles.placeholderText}>{post.title}</span>
                     </div>
                   )}
+
+                  {post.pinned && <div style={styles.pinBadge}>📌</div>}
 
                   <div style={{
                     ...styles.statusBadge,
@@ -192,28 +199,18 @@ export default function Widget() {
           ))}
         </div>
 
-        <p style={styles.hint}>Glisse pour réorganiser · Clique pour voir · Rafraîchissement auto depuis Notion</p>
+        <p style={styles.hint}>
+          Glisse pour réorganiser · 📌 = épinglé · Clique pour voir · Rafraîchissement auto
+        </p>
       </div>
 
       {preview && (
         <div style={styles.modalBg} onClick={() => setPreview(null)}>
           <div style={styles.modal} onClick={e => e.stopPropagation()}>
             <button style={styles.modalClose} onClick={() => setPreview(null)}>✕</button>
-
-            {preview.imageUrl && isCanvaUrl(preview.imageUrl) ? (
-              <div style={{ width: '100%', aspectRatio: '1', overflow: 'hidden', background: '#f3f4f6' }}>
-                <iframe
-                  src={getCanvaEmbedUrl(preview.imageUrl)}
-                  style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
-                  allowFullScreen
-                  allow="fullscreen *;"
-                  title={preview.title}
-                />
-              </div>
-            ) : preview.imageUrl ? (
+            {preview.imageUrl && (
               <img src={preview.imageUrl} alt={preview.title} style={styles.modalImg} />
-            ) : null}
-
+            )}
             <div style={styles.modalInfo}>
               <h3 style={styles.modalTitle}>{preview.title}</h3>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
@@ -224,17 +221,12 @@ export default function Widget() {
                 }}>
                   {STATUS_CONFIG[preview.status].label}
                 </span>
-                {preview.platform && <span style={styles.platformBadge}>{preview.platform}</span>}
+                {preview.pinned && <span style={styles.modalPinBadge}>📌 Épinglé</span>}
+                {preview.platform && <span style={styles.dateBadge}>{preview.platform}</span>}
                 {preview.date && (
                   <span style={styles.dateBadge}>
                     {new Date(preview.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}
                   </span>
-                )}
-                {isCanvaUrl(preview.imageUrl) && (
-                  <a href={preview.imageUrl} target="_blank" rel="noreferrer"
-                    style={{ ...styles.dateBadge, color: '#7c3aed', textDecoration: 'none' }}>
-                    Ouvrir dans Canva →
-                  </a>
                 )}
               </div>
               {preview.notionUrl && (
@@ -278,20 +270,20 @@ function ErrorScreen({ message, onRetry }) {
 
 const styles = {
   root: { fontFamily: 'system-ui, -apple-system, sans-serif', padding: '12px', background: '#fff', minHeight: '100vh' },
-  filterRow: { display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' },
+  filterRow: { display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' },
   filterBtn: { padding: '4px 10px', fontSize: 12, borderRadius: 20, border: '1px solid #e5e7eb', background: 'transparent', color: '#6b7280', cursor: 'pointer' },
   filterBtnActive: { background: '#111827', color: '#fff', borderColor: '#111827' },
   refreshBtn: { marginLeft: 'auto', padding: '4px 10px', fontSize: 16, borderRadius: 20, border: '1px solid #e5e7eb', background: 'transparent', color: '#9ca3af', cursor: 'pointer' },
+  pinnedHint: { fontSize: 11, color: '#6b7280', marginBottom: 6, padding: '3px 8px', background: '#fef9c3', borderRadius: 6, display: 'inline-block' },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 3 },
-  cell: { aspectRatio: '1', position: 'relative', background: '#f3f4f6', overflow: 'hidden', cursor: 'pointer', borderRadius: 2 },
+  // ✅ Ratio 4:5 au lieu de carré (1/1)
+  cell: { aspectRatio: '4/5', position: 'relative', background: '#f3f4f6', overflow: 'hidden', cursor: 'pointer', borderRadius: 2 },
   cellDragging: { opacity: 0.4, cursor: 'grabbing' },
-  canvaWrapper: { position: 'absolute', inset: 0, overflow: 'hidden', background: '#fff' },
-  canvaIframe: { width: '300%', height: '300%', border: 'none', transform: 'scale(0.333)', transformOrigin: 'top left', pointerEvents: 'none' },
-  canvaClickCatcher: { position: 'absolute', inset: 0, zIndex: 2, cursor: 'pointer' },
-  canvaBadge: { position: 'absolute', bottom: 4, right: 4, fontSize: 8, padding: '2px 5px', borderRadius: 3, background: 'rgba(124,58,237,0.85)', color: '#fff', fontWeight: 600, zIndex: 3, pointerEvents: 'none' },
+  cellPinned: { outline: '2px solid #f59e0b', outlineOffset: '-2px' },
   img: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
   placeholder: { width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, background: '#f9fafb' },
   placeholderText: { fontSize: 10, color: '#9ca3af', textAlign: 'center', padding: '0 6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '90%' },
+  pinBadge: { position: 'absolute', top: 4, right: 4, fontSize: 12, zIndex: 4 },
   statusBadge: { position: 'absolute', top: 4, left: 4, fontSize: 9, padding: '2px 5px', borderRadius: 4, fontWeight: 600, lineHeight: 1.4, zIndex: 4 },
   hoverOverlay: { position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', padding: 8, opacity: 0, transition: 'opacity 0.18s', zIndex: 5 },
   hoverTitle: { color: '#fff', fontSize: 11, fontWeight: 500, textAlign: 'center', lineHeight: 1.3 },
@@ -301,10 +293,10 @@ const styles = {
   modalBg: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999, padding: 20 },
   modal: { background: '#fff', borderRadius: 12, maxWidth: 380, width: '100%', overflow: 'hidden', position: 'relative' },
   modalClose: { position: 'absolute', top: 10, right: 10, background: 'rgba(0,0,0,0.5)', color: '#fff', border: 'none', borderRadius: '50%', width: 28, height: 28, cursor: 'pointer', fontSize: 13, zIndex: 1 },
-  modalImg: { width: '100%', aspectRatio: '1', objectFit: 'cover', display: 'block' },
+  modalImg: { width: '100%', aspectRatio: '4/5', objectFit: 'cover', display: 'block' },
   modalInfo: { padding: '14px 16px 16px' },
   modalTitle: { fontSize: 15, fontWeight: 600, color: '#111827', margin: 0 },
-  platformBadge: { fontSize: 12, padding: '3px 8px', borderRadius: 4, background: '#f3f4f6', color: '#374151' },
+  modalPinBadge: { fontSize: 12, padding: '3px 8px', borderRadius: 4, background: '#fef3c7', color: '#b45309' },
   dateBadge: { fontSize: 12, padding: '3px 8px', borderRadius: 4, background: '#f3f4f6', color: '#374151' },
   notionLink: { display: 'inline-block', marginTop: 12, fontSize: 13, color: '#6366f1', textDecoration: 'none', fontWeight: 500 },
 }
