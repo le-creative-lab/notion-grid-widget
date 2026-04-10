@@ -7,17 +7,6 @@ const STATUS_CONFIG = {
   posted:    { label: 'Publié',    color: '#15803d', bg: '#dcfce7' },
 }
 
-function isCanvaUrl(url) {
-  return url && url.includes('canva.com')
-}
-
-function getCanvaEmbedUrl(url) {
-  if (!url) return null
-  const match = url.match(/canva\.com\/design\/([^\/\?]+)\/([^\/\?]+)/)
-  if (match) return `/api/canva-proxy?url=${encodeURIComponent(url)}`
-  return null
-}
-
 export default function Widget() {
   const [posts, setPosts]         = useState([])
   const [filtered, setFiltered]   = useState([])
@@ -66,15 +55,13 @@ export default function Widget() {
   }, [config, fetchPosts])
 
   useEffect(() => {
-    // Filtre les posts masqués, trie les pinnés en premier
     let ordered = order.map(id => posts.find(p => p.id === id)).filter(Boolean)
+    // Filtre les posts masqués
     ordered = ordered.filter(p => !p.hidden)
-    
     // Pinnés en premier (max 3), puis le reste
-    const pinned  = ordered.filter(p => p.pinned).slice(0, 3)
+    const pinned   = ordered.filter(p => p.pinned).slice(0, 3)
     const unpinned = ordered.filter(p => !p.pinned)
     ordered = [...pinned, ...unpinned]
-
     if (filter === 'all') setFiltered(ordered)
     else setFiltered(ordered.filter(p => p.status === filter))
   }, [posts, filter, order])
@@ -98,15 +85,13 @@ export default function Widget() {
   }
   function onDragEnd() { setDragIndex(null) }
 
-  // Grille 4:5 — toujours multiple de 3, min 9 cellules
   const totalCells = Math.max(9, Math.ceil(filtered.length / 3) * 3)
   const cells      = Array.from({ length: totalCells }, (_, i) => filtered[i] || null)
+  const pinnedCount = posts.filter(p => p.pinned && !p.hidden).length
 
   if (!config && error) return <ErrorScreen message={error} />
   if (loading)          return <LoadingScreen />
   if (error)            return <ErrorScreen message={error} onRetry={fetchPosts} />
-
-  const pinnedCount = posts.filter(p => p.pinned && !p.hidden).length
 
   return (
     <>
@@ -137,7 +122,7 @@ export default function Widget() {
 
         {pinnedCount > 0 && (
           <div style={styles.pinnedHint}>
-            📌 {pinnedCount} post{pinnedCount > 1 ? 's' : ''} épinglé{pinnedCount > 1 ? 's' : ''} en haut
+            📌 {pinnedCount} post{pinnedCount > 1 ? 's' : ''} épinglé{pinnedCount > 1 ? 's' : ''}
           </div>
         )}
 
@@ -199,9 +184,7 @@ export default function Widget() {
           ))}
         </div>
 
-        <p style={styles.hint}>
-          Glisse pour réorganiser · 📌 = épinglé · Clique pour voir · Rafraîchissement auto
-        </p>
+        <p style={styles.hint}>Glisse pour réorganiser · 📌 = épinglé · Clique pour voir · Rafraîchissement auto</p>
       </div>
 
       {preview && (
@@ -274,9 +257,8 @@ const styles = {
   filterBtn: { padding: '4px 10px', fontSize: 12, borderRadius: 20, border: '1px solid #e5e7eb', background: 'transparent', color: '#6b7280', cursor: 'pointer' },
   filterBtnActive: { background: '#111827', color: '#fff', borderColor: '#111827' },
   refreshBtn: { marginLeft: 'auto', padding: '4px 10px', fontSize: 16, borderRadius: 20, border: '1px solid #e5e7eb', background: 'transparent', color: '#9ca3af', cursor: 'pointer' },
-  pinnedHint: { fontSize: 11, color: '#6b7280', marginBottom: 6, padding: '3px 8px', background: '#fef9c3', borderRadius: 6, display: 'inline-block' },
+  pinnedHint: { fontSize: 11, color: '#92400e', marginBottom: 6, padding: '3px 8px', background: '#fef3c7', borderRadius: 6, display: 'inline-block' },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 3 },
-  // ✅ Ratio 4:5 au lieu de carré (1/1)
   cell: { aspectRatio: '4/5', position: 'relative', background: '#f3f4f6', overflow: 'hidden', cursor: 'pointer', borderRadius: 2 },
   cellDragging: { opacity: 0.4, cursor: 'grabbing' },
   cellPinned: { outline: '2px solid #f59e0b', outlineOffset: '-2px' },
